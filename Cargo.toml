@@ -1,0 +1,42 @@
+# The web-free document / CRDT kernel, extracted from md-preview (ADR-0008
+# Phase 1). Holds the CRDT document model (`doc`/`session`), the diff bridge, the
+# yrs UB pre-decode validator, the transport-agnostic collab wire codec, and the
+# `FilePeer` file bridge. Deliberately free of any web/async dep (no
+# warp/tokio/hyper/ureq/sha2): the LAN/WAN relay (goal D2) reuses the codec and
+# research-thin-server (goal D1) reuses `FilePeer` without dragging in the daemon
+# stack. Verify with `cargo tree -p doc-core -e normal` — no web crates.
+[package]
+name = "doc-core"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[features]
+# `notify`-backed filewatcher for `FilePeer::watch`/`run`. On by default so the
+# existing md-preview behavior is unchanged; a non-watching embedder can take the
+# crate without a filewatcher via `--no-default-features` (ADR-0008 ruling (b)).
+default = ["watch"]
+watch = ["dep:notify"]
+
+# F3 — assumption-breaking knobs for the yrs UB guard (`validate.rs`). These exist
+# ONLY to make a silent bypass impossible: the validator's grammar is pinned to
+# default `yrs` features on the v1 wire format, so enabling any of these is a
+# `compile_error!` in `validate.rs` until that grammar is revisited. Off by
+# default (declared, unused). md-preview forwards its same-named features here so
+# the interlock fires from either crate (ADR-0008 Phase 1: carry the guard verbatim).
+yrs-small-client = ["yrs/small-client"]
+yrs-weak = ["yrs/weak"]
+yrs-v2-collab = []
+
+# Optional base64 convenience entry point for the UB validator
+# (`is_update_b64_safe`). Off in the minimal kernel; md-preview's `daemon` feature
+# enables it so the function is present identically in daemon builds.
+base64 = ["dep:base64"]
+
+[dependencies]
+# `sync` enables y-protocols framing types (Message/SyncMessage) for the collab
+# wire codec (ADR-0004). NO web/async deps live here by design.
+yrs = { version = "0.27.2", features = ["sync"] }
+similar = "3.1.1"  # char-level diff for the file<->session bridge
+notify = { version = "8.2.0", optional = true }  # filewatcher for FilePeer (feature-gated)
+base64 = { version = "0.22", optional = true }  # base64 validator entry point (feature-gated, off by default)
