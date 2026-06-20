@@ -709,4 +709,285 @@ mod tests {
         );
         assert!(!is_update_b64_safe(""), "empty string rejected");
     }
+
+    // --- additional adversarial cases -----------------------------------------
+
+    /// Helper: build the common prefix for a single-block frame with no origin
+    /// bits (cant_copy_parent_info=true) and a TypePtr::ID parent (parent_info=0).
+    /// Returns a Vec<u8> covering: clients_len=1, blocks_len=1, client=0,
+    /// clock=0, info byte, parent_info=0, parent id client=0, parent id clock=0.
+    fn single_block_prefix(info: u8) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.push(1); // clients_len
+        v.push(1); // blocks_len
+        v.push(0); // client (u64 varint)
+        v.push(0); // start clock (u32 varint)
+        v.push(info); // info byte
+        v.push(0); // parent_info = 0 → TypePtr::ID
+        v.push(0); // parent id client
+        v.push(0); // parent id clock
+        v
+    }
+
+    /// Append a length-prefixed byte string to a buffer.
+    fn push_string(v: &mut Vec<u8>, bytes: &[u8]) {
+        // Length as a varint (u32); for test sizes (<128) a single byte suffices.
+        assert!(bytes.len() < 128, "test helper only handles short strings");
+        v.push(bytes.len() as u8);
+        v.extend_from_slice(bytes);
+    }
+
+    #[test]
+    fn format_block_invalid_utf8_in_key() {
+        // FORMAT block (info & 0xf == 6 = BLOCK_ITEM_FORMAT): two strings — key
+        // then value. The key carries invalid UTF-8; must reject.
+        let invalid_key: &[u8] = &[0xFE, 0x80]; // invalid UTF-8
+        let valid_val: &[u8] = b"true";
+        let mut update = single_block_prefix(BLOCK_ITEM_FORMAT);
+        push_string(&mut update, invalid_key);
+        push_string(&mut update, valid_val);
+        update.push(0); // delete set client_len=0
+        assert!(
+            !is_update_bytes_safe(&update),
+            "FORMAT block with invalid UTF-8 key must be rejected"
+        );
+    }
+
+    #[test]
+    fn format_block_invalid_utf8_in_value() {
+        // FORMAT block: valid UTF-8 key, invalid UTF-8 value. Both read_string
+        // sites must be checked; this confirms the second one fires.
+        let valid_key: &[u8] = b"bold";
+        let invalid_val: &[u8] = &[0xFE, 0x80];
+        let mut update = single_block_prefix(BLOCK_ITEM_FORMAT);
+        push_string(&mut update, valid_key);
+        push_string(&mut update, invalid_val);
+        update.push(0); // delete set client_len=0
+        assert!(
+            !is_update_bytes_safe(&update),
+            "FORMAT block with invalid UTF-8 value must be rejected"
+        );
+    }
+
+    #[test]
+    fn embed_block_invalid_utf8() {
+        // EMBED block (info & 0xf == 5 = BLOCK_ITEM_EMBED): a single string field
+        // (the JSON embed). Invalid UTF-8 must be rejected.
+        let invalid: &[u8] = &[0xC0, 0x80]; // overlong NUL — invalid UTF-8
+        let mut update = single_block_prefix(BLOCK_ITEM_EMBED);
+        push_string(&mut update, invalid);
+        update.push(0);
+        assert!(
+            !is_update_bytes_safe(&update),
+            "EMBED block with invalid UTF-8 must be rejected"
+        );
+    }
+
+    #[test]
+    fn type_ref_xml_element_invalid_utf8() {
+        // TYPE block (BLOCK_ITEM_TYPE = 7) with type_ref = TYPE_REFS_XML_ELEMENT
+        // (3): that branch calls read_string for the element tag name.
+        // Surrogate-half bytes are invalid UTF-8.
+        let invalid_tag: &[u8] = &[0xED, 0xA0, 0x80]; // lone surrogate half
+        let mut update = single_block_prefix(BLOCK_ITEM_TYPE);
+        update.push(TYPE_REFS_XML_ELEMENT); // type_ref byte
+        push_string(&mut update, invalid_tag);
+        update.push(0);
+        assert!(
+            !is_update_bytes_safe(&update),
+            "TYPE block XmlElement with invalid UTF-8 tag must be rejected"
+        );
+    }
+
+    #[test]
+    fn type_ref_unknown_tag_rejected() {
+        // TYPE block with a type_ref not in {0,1,2,3,4,5,6,9,15} — maps to
+        // BadTag and must be rejected.
+        let mut update = single_block_prefix(BLOCK_ITEM_TYPE);
+        update.push(8); // 8 is not a valid type_ref (TYPE_REFS_WEAK forbidden)
+        update.push(0);
+        assert!(
+            !is_update_bytes_safe(&update),
+            "TYPE block with unknown type_ref must be rejected"
+        );
+    }
+
+    #[test]
+    fn doc_block_invalid_utf8_guid() {
+        // DOC block (BLOCK_ITEM_DOC = 9): first field is the guid string, then an
+        // Any value. Invalid UTF-8 in the guid must be rejected.
+        let invalid_guid: &[u8] = &[0xC3, 0x28];
+        let mut update = single_block_prefix(BLOCK_ITEM_DOC);
+        push_string(&mut update, invalid_guid);
+        // Any value would follow but the reject fires before we get there.
+        update.push(0); // delete set (update is already malformed before this)
+        assert!(
+            !is_update_bytes_safe(&update),
+            "DOC block with invalid UTF-8 guid must be rejected"
+        );
+    }
+
+    #[test]
+    fn named_parent_invalid_utf8() {
+        // Block with cant_copy_parent_info=true (no HAS_ORIGIN or HAS_RIGHT_ORIGIN
+        // bits) and parent_info=1 (→ TypePtr::Named → a string). The named-parent
+        // string carries invalid UTF-8; must reject.
+        //
+        // info = BLOCK_ITEM_DELETED (1, no high bits) so content is just one varint.
+        let invalid_name: &[u8] = &[0xC3, 0x28];
+        let mut update = Vec::new();
+        update.push(1); // clients_len
+        update.push(1); // blocks_len
+        update.push(0); // client
+        update.push(0); // clock
+        update.push(BLOCK_ITEM_DELETED); // info (1, no origin bits)
+        update.push(1); // parent_info = 1 → TypePtr::Named → read_string
+        push_string(&mut update, invalid_name);
+        // If we got past the named-parent string, content would follow; but reject
+        // fires first. Push a delete set anyway so the frame looks structurally
+        // complete if the string were valid.
+        update.push(1); // content len (DELETED content)
+        update.push(0); // delete set client_len=0
+        assert!(
+            !is_update_bytes_safe(&update),
+            "named parent string with invalid UTF-8 must be rejected"
+        );
+    }
+
+    #[test]
+    fn parent_sub_invalid_utf8() {
+        // Block with HAS_PARENT_SUB set and no origin bits (cant_copy_parent_info=
+        // true). After the TypePtr::ID parent, the parent_sub key string is read.
+        // Invalid UTF-8 there must be rejected.
+        //
+        // info = BLOCK_ITEM_DELETED | HAS_PARENT_SUB = 0x01 | 0x20 = 0x21.
+        let invalid_sub: &[u8] = &[0xC3, 0x28];
+        let mut update = Vec::new();
+        update.push(1); // clients_len
+        update.push(1); // blocks_len
+        update.push(0); // client
+        update.push(0); // clock
+        update.push(0x21); // info: DELETED | HAS_PARENT_SUB, no origin bits
+        update.push(0); // parent_info = 0 → TypePtr::ID
+        update.push(0); // parent id client
+        update.push(0); // parent id clock
+        push_string(&mut update, invalid_sub); // parent_sub (HAS_PARENT_SUB)
+        update.push(1); // DELETED content len
+        update.push(0); // delete set client_len=0
+        assert!(
+            !is_update_bytes_safe(&update),
+            "parent_sub with invalid UTF-8 must be rejected"
+        );
+    }
+
+    #[test]
+    fn any_map_key_invalid_utf8() {
+        // ANY block (BLOCK_ITEM_ANY = 8): one Map Any (tag=118) with one entry
+        // whose key carries invalid UTF-8. Must reject.
+        let invalid_key: &[u8] = &[0xC3, 0x28];
+        let mut update = single_block_prefix(BLOCK_ITEM_ANY);
+        update.push(1); // ANY len = 1 element
+        update.push(118); // Any tag: Map
+        update.push(1); // map len = 1 entry
+        push_string(&mut update, invalid_key); // map key
+        // map value would follow if key were valid; reject fires first.
+        update.push(0);
+        assert!(
+            !is_update_bytes_safe(&update),
+            "Any map key with invalid UTF-8 must be rejected"
+        );
+    }
+
+    #[test]
+    fn any_string_invalid_utf8() {
+        // ANY block with a string Any (tag=119): the string carries invalid UTF-8.
+        let invalid: &[u8] = &[0xC3, 0x28];
+        let mut update = single_block_prefix(BLOCK_ITEM_ANY);
+        update.push(1); // ANY len = 1
+        update.push(119); // Any tag: string
+        push_string(&mut update, invalid);
+        update.push(0);
+        assert!(
+            !is_update_bytes_safe(&update),
+            "Any string with invalid UTF-8 must be rejected"
+        );
+    }
+
+    #[test]
+    fn binary_block_accepts_non_utf8_bytes() {
+        // BINARY block (BLOCK_ITEM_BINARY = 3): arbitrary bytes with no UTF-8
+        // requirement. An update whose binary payload contains all-0xFF bytes
+        // must be ACCEPTED — the validator must not over-reject non-UTF-8 content
+        // in fields that have no UTF-8 invariant.
+        let arbitrary_bytes: &[u8] = &[0xFF, 0xFE, 0x00, 0x01];
+        let mut update = single_block_prefix(BLOCK_ITEM_BINARY);
+        push_string(&mut update, arbitrary_bytes); // read_buf: length-prefixed, no UTF-8 check
+        update.push(0);
+        assert!(
+            is_update_bytes_safe(&update),
+            "BINARY block with non-UTF-8 bytes must be accepted (no UTF-8 requirement)"
+        );
+    }
+
+    #[test]
+    fn multiple_blocks_second_has_invalid_utf8() {
+        // Two blocks: first STRING block is well-formed, second STRING block
+        // carries invalid UTF-8. The rejection must propagate from the second block.
+        let valid: &[u8] = b"ok";
+        let invalid: &[u8] = &[0xC3, 0x28];
+        let mut update = Vec::new();
+        update.push(1); // clients_len = 1
+        update.push(2); // blocks_len = 2
+        update.push(0); // client
+        update.push(0); // clock
+        // Block 1: STRING, parent_info=0→ID
+        update.push(BLOCK_ITEM_STRING);
+        update.push(0); // parent_info
+        update.push(0); // parent id client
+        update.push(0); // parent id clock
+        push_string(&mut update, valid);
+        // Block 2: STRING, parent_info=0→ID, invalid UTF-8
+        update.push(BLOCK_ITEM_STRING);
+        update.push(0);
+        update.push(0);
+        update.push(0);
+        push_string(&mut update, invalid);
+        update.push(0); // delete set client_len=0
+        assert!(
+            !is_update_bytes_safe(&update),
+            "second block with invalid UTF-8 must cause overall rejection"
+        );
+    }
+
+    #[test]
+    fn delete_set_truncation_rejected() {
+        // A frame with zero blocks (clients_len=0 for the block section) followed
+        // by a delete set that claims 10 id-ranges but provides only 1 byte.
+        // The cursor's read_var hits end-of-buffer → reject (no over-read).
+        let mut update = Vec::new();
+        update.push(0); // clients_len = 0 (no blocks)
+        // Delete set:
+        update.push(1); // client_len = 1
+        update.push(42); // client id (varint u64 = 42)
+        update.push(10); // range_len = 10 (claims 10 (clock, range_len) pairs)
+        update.push(7); // only one byte of data — far short of 10 pairs
+        assert!(
+            !is_update_bytes_safe(&update),
+            "truncated delete set must be rejected"
+        );
+    }
+
+    #[test]
+    fn unknown_any_tag_rejected() {
+        // ANY block containing an Any value whose tag byte (100) is not in the
+        // defined set (116-127). Must reject with BadTag.
+        let mut update = single_block_prefix(BLOCK_ITEM_ANY);
+        update.push(1); // ANY len = 1
+        update.push(100); // unknown Any tag
+        update.push(0);
+        assert!(
+            !is_update_bytes_safe(&update),
+            "unknown Any tag must be rejected"
+        );
+    }
 }
