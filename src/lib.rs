@@ -25,9 +25,9 @@
 //!   edges (ADR-0008 acyclic DAG). The daemon does the confinement and drives the
 //!   peer through doc-core's public API.
 
-pub mod doc;
+pub mod collab;
 pub mod diff;
+pub mod doc;
+pub mod file_peer;
 pub mod session;
 pub mod validate;
-pub mod collab;
-pub mod file_peer;

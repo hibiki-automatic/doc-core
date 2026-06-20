@@ -516,7 +516,12 @@ mod tests {
             static COUNTER: AtomicU64 = AtomicU64::new(0);
             let n = COUNTER.fetch_add(1, Ordering::Relaxed);
             let mut path = std::env::temp_dir();
-            path.push(format!("md-preview-fp-{}-{}-{}", tag, std::process::id(), n));
+            path.push(format!(
+                "md-preview-fp-{}-{}-{}",
+                tag,
+                std::process::id(),
+                n
+            ));
             std::fs::create_dir_all(&path).expect("create temp dir");
             Self { path }
         }
@@ -546,9 +551,15 @@ mod tests {
 
         // Simulate an external editor save.
         std::fs::write(&file, "hello world").unwrap();
-        assert!(peer.sync_from_disk().unwrap(), "external change should apply");
+        assert!(
+            peer.sync_from_disk().unwrap(),
+            "external change should apply"
+        );
         assert_eq!(peer.session().text(), "hello world");
-        assert_eq!(peer.session().text(), std::fs::read_to_string(&file).unwrap());
+        assert_eq!(
+            peer.session().text(),
+            std::fs::read_to_string(&file).unwrap()
+        );
 
         // Idempotent: nothing new on disk.
         assert!(!peer.sync_from_disk().unwrap());
@@ -565,7 +576,8 @@ mod tests {
         let mut peer = FilePeer::new(&file, YrsSession::from_text("start")).unwrap();
 
         // Mutate the session (as a browser peer would), then write it out.
-        peer.session_mut().apply(&[crate::doc::TextEdit::insert(5, "!")]);
+        peer.session_mut()
+            .apply(&[crate::doc::TextEdit::insert(5, "!")]);
         assert_eq!(peer.session().text(), "start!");
         peer.write_to_disk().unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "start!");
@@ -668,7 +680,10 @@ mod tests {
     fn within_accepts_nonexistent_in_root_file() {
         let dir = TempDir::new("within-new");
         let peer = FilePeer::within(&dir.path, "later.md", YrsSession::from_text("")).unwrap();
-        assert_eq!(peer.path(), dir.path.canonicalize().unwrap().join("later.md"));
+        assert_eq!(
+            peer.path(),
+            dir.path.canonicalize().unwrap().join("later.md")
+        );
     }
 
     /// `within` rejects a `../` traversal that climbs above the root.

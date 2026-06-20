@@ -37,12 +37,20 @@ pub struct TextEdit {
 impl TextEdit {
     /// A pure insertion at `pos`.
     pub fn insert(pos: usize, ins: impl Into<String>) -> Self {
-        Self { pos, del: 0, ins: ins.into() }
+        Self {
+            pos,
+            del: 0,
+            ins: ins.into(),
+        }
     }
 
     /// A pure deletion of `del` code units at `pos`.
     pub fn delete(pos: usize, del: usize) -> Self {
-        Self { pos, del, ins: String::new() }
+        Self {
+            pos,
+            del,
+            ins: String::new(),
+        }
     }
 }
 

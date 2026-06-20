@@ -92,7 +92,8 @@ impl DocSession for YrsSession {
             let mut txn = self.doc.transact_mut();
             for edit in ordered {
                 if edit.del > 0 {
-                    self.text.remove_range(&mut txn, edit.pos as u32, edit.del as u32);
+                    self.text
+                        .remove_range(&mut txn, edit.pos as u32, edit.del as u32);
                 }
                 if !edit.ins.is_empty() {
                     self.text.insert(&mut txn, edit.pos as u32, &edit.ins);
@@ -201,9 +202,9 @@ mod tests {
     fn session_apply_multi_edit_batch() {
         let mut s = YrsSession::from_text("abcdef");
         s.apply(&[
-            TextEdit::insert(0, "["),   // before 'a'
-            TextEdit::delete(2, 2),     // remove 'cd'
-            TextEdit::insert(6, "]"),   // after 'f' (pre-batch end)
+            TextEdit::insert(0, "["), // before 'a'
+            TextEdit::delete(2, 2),   // remove 'cd'
+            TextEdit::insert(6, "]"), // after 'f' (pre-batch end)
         ]);
         // "abcdef" -> "[abef]"
         assert_eq!(s.text(), "[abef]");
@@ -255,7 +256,10 @@ mod tests {
         // The full update an empty (knows-nothing) SV yields — the documented
         // fallback any unparseable SV must also produce.
         let full = s.update_since(&[]);
-        assert!(!full.is_empty(), "non-empty doc yields a non-empty full update");
+        assert!(
+            !full.is_empty(),
+            "non-empty doc yields a non-empty full update"
+        );
 
         // A spread of adversarial / malformed SV byte strings: truncated varints,
         // an over-long varint run, random noise, and a valid prefix + garbage.
@@ -265,7 +269,9 @@ mod tests {
             &[0x80, 0x80, 0x80, 0x80, 0x80],
             &[0x01, 0x80],
             &[0xDE, 0xAD, 0xBE, 0xEF],
-            &[0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            &[
+                0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+            ],
         ];
         for bytes in malformed {
             // Must not panic; result is the safe full-doc fallback (or possibly a

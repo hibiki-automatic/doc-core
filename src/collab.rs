@@ -351,7 +351,10 @@ mod tests {
             |_| panic!("rebuild must not run for an oversized update"),
         );
         assert!(!out.changed, "oversized update makes no change");
-        assert!(!merged, "merge_fn must not be called for an oversized update");
+        assert!(
+            !merged,
+            "merge_fn must not be called for an oversized update"
+        );
     }
 
     /// #5: an undecodable update is a no-op — `merge` returns false, the
@@ -362,14 +365,12 @@ mod tests {
         let mut rebuilt = false;
         // Garbage bytes that are *not* a valid v1 update.
         let garbage = vec![0xffu8, 0x00, 0x13, 0x37];
-        let out = apply_client_update(
-            &garbage,
-            "keep",
-            |u| s.merge(u),
-            |_| rebuilt = true,
-        );
+        let out = apply_client_update(&garbage, "keep", |u| s.merge(u), |_| rebuilt = true);
         assert!(!out.changed, "undecodable update changes nothing");
-        assert!(!rebuilt, "an undecodable (non-panicking) update needs no rebuild");
+        assert!(
+            !rebuilt,
+            "an undecodable (non-panicking) update needs no rebuild"
+        );
         assert_eq!(s.text(), "keep", "session text unchanged");
     }
 

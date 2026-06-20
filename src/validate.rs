@@ -452,7 +452,8 @@ mod tests {
         let _txt = doc.get_or_insert_text("content");
         {
             let mut txn = doc.transact_mut();
-            txn.apply_update(decoded.expect("decoded above")).expect("apply");
+            txn.apply_update(decoded.expect("decoded above"))
+                .expect("apply");
         }
         let txt = doc.get_or_insert_text("content");
         let txn = doc.transact();
@@ -636,7 +637,10 @@ mod tests {
         let update = txn.encode_state_as_update_v1(&yrs::StateVector::default());
         let safe = is_update_bytes_safe(&update);
         let decodes = yrs::Update::decode_v1(&update).is_ok();
-        assert_eq!(safe, decodes, "validator must agree with decode_v1 on empty doc");
+        assert_eq!(
+            safe, decodes,
+            "validator must agree with decode_v1 on empty doc"
+        );
     }
 
     /// F3 LOCKED ASSUMPTION TEST. The validator's grammar is pinned to the v1
@@ -695,8 +699,14 @@ mod tests {
         use base64::Engine as _;
         let update = make_valid_update("b64 path");
         let b64 = base64::engine::general_purpose::STANDARD.encode(&update);
-        assert!(is_update_b64_safe(&b64), "valid update, base64-encoded, accepted");
-        assert!(!is_update_b64_safe("not valid base64!!!"), "bad base64 rejected");
+        assert!(
+            is_update_b64_safe(&b64),
+            "valid update, base64-encoded, accepted"
+        );
+        assert!(
+            !is_update_b64_safe("not valid base64!!!"),
+            "bad base64 rejected"
+        );
         assert!(!is_update_b64_safe(""), "empty string rejected");
     }
 }

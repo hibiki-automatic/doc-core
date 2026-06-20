@@ -109,10 +109,7 @@ mod tests {
             );
             // A run with del==0 && ins=="" would be a no-op; the engine should
             // never emit one.
-            assert!(
-                e.del > 0 || !e.ins.is_empty(),
-                "no-op edit emitted: {e:?}"
-            );
+            assert!(e.del > 0 || !e.ins.is_empty(), "no-op edit emitted: {e:?}");
             cursor = e.pos + e.del;
         }
     }
@@ -121,7 +118,11 @@ mod tests {
     fn check(old: &str, new: &str) -> Vec<TextEdit> {
         let edits = diff(old, new);
         assert_well_formed(&edits);
-        assert_eq!(apply(old, &edits), new, "round-trip failed for {old:?} -> {new:?}");
+        assert_eq!(
+            apply(old, &edits),
+            new,
+            "round-trip failed for {old:?} -> {new:?}"
+        );
         edits
     }
 
@@ -171,10 +172,24 @@ mod tests {
     fn replace_coalesces() {
         // A contiguous delete+insert at the same anchor is ONE edit.
         let edits = check("cat", "dog");
-        assert_eq!(edits.len(), 1, "should be a single coalesced edit: {edits:?}");
+        assert_eq!(
+            edits.len(),
+            1,
+            "should be a single coalesced edit: {edits:?}"
+        );
         let e = &edits[0];
-        assert!(e.del > 0 && !e.ins.is_empty(), "edit should both delete and insert: {e:?}");
-        assert_eq!(*e, TextEdit { pos: 0, del: 3, ins: "dog".into() });
+        assert!(
+            e.del > 0 && !e.ins.is_empty(),
+            "edit should both delete and insert: {e:?}"
+        );
+        assert_eq!(
+            *e,
+            TextEdit {
+                pos: 0,
+                del: 3,
+                ins: "dog".into()
+            }
+        );
     }
 
     #[test]
@@ -189,7 +204,10 @@ mod tests {
     fn multiple_separate_regions() {
         // Two independent changes: insert near the front, delete near the back.
         let edits = check("abcXYZdef", "abQcXYZde");
-        assert!(edits.len() >= 2, "expected multiple edit regions: {edits:?}");
+        assert!(
+            edits.len() >= 2,
+            "expected multiple edit regions: {edits:?}"
+        );
         assert_well_formed(&edits); // ascending + non-overlapping
     }
 
@@ -239,7 +257,10 @@ mod tests {
             ("hello world", "hello cruel world"),
             ("the quick brown fox", "the lazy brown dog"),
             ("😀 emoji 🎉 test", "😀 emoji test 🎉🎉"),
-            ("line one\nline two\nline three", "line one\nline 2\nline three\nline four"),
+            (
+                "line one\nline two\nline three",
+                "line one\nline 2\nline three\nline four",
+            ),
             ("αβγδ", "αXβδZ"),
             ("aaaaa", ""),
             ("", "bbbbb"),
